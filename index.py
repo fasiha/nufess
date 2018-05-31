@@ -43,19 +43,24 @@ def setup(xunif, f1nonunif, nneighbors):
     """
     nunif = xunif.size
     nupsampled = 2 * nunif  # this is "flexible" in the paper but not really
-    etaSpacing = (nunif - 1) / 2
-    n = np.arange(nunif)  # 0 ... N-1
-    kbftArgs = (n - etaSpacing) / nupsampled
     kbAlpha = 2.34 * nneighbors  # rule of thumb
     kbOrder = 0  # rule of thumb
+
+    # Generate prescale
+    etaSpacing = (nunif - 1) / 2
+    kbftArgs = (np.arange(nunif) - etaSpacing) / nupsampled
     prescale = kaiserBesselFourierTransform(kbftArgs, kbAlpha, kbOrder, nneighbors, 1)
 
+    # Generate postfilter
     offset = np.floor(f1nonunif * nupsampled - nneighbors / 2)
     kbArgs = -np.arange(1, nneighbors + 0.5) + (f1nonunif * nupsampled - offset)[:, np.newaxis]
     Tr = kaiserBessel(kbArgs, kbAlpha, kbOrder, nneighbors)
     postfilter = np.exp(1j * 2 * np.pi / nupsampled * etaSpacing * kbArgs) * Tr
 
+    # Scale input and FFT after 2x zeropad
     Y = fft.fft(xunif / prescale, nupsampled)
+
+    # Postfilter spectrum
     Xnonunif = np.zeros(f1nonunif.shape, Y.dtype)
     for idx in range(len(f1nonunif)):
         o = offset[idx]
