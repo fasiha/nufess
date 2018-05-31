@@ -1,18 +1,29 @@
 import numpy as np
+import numpy.fft as fft
 from scipy.special import jv, iv
 
 
 def kaiserBesselFourierTransform(u, alpha, m, nneighbors, ndim):
-    "Ψ(u) = Psi(u), p. 571 of [Fessler]"
+    "Ψ(u) = Psi(u), p. 571 of [Fessler], modified to match Matlab code"
     z = np.sqrt((np.pi * nneighbors * (u + 0j))**2 - alpha**2)
     nu = ndim / 2 + m
-    LambdaZ = (z * 0.5)**(-nu) * jv(nu, z)
-    sol = (0.5**m) * (np.pi**(ndim * 0.5)) * ((nneighbors * 0.5)**ndim) * (
+    LambdaZ = jv(nu, z) / z**(nu)
+    sol = ((2 * np.pi)**(ndim * 0.5)) * ((nneighbors * 0.5)**ndim) * (
         alpha**m) * LambdaZ / iv(m, alpha)
     return sol.real
 
 
-def setup(xunif, fnonunif, nneighbors, ntable):
+def kaiserBessel(k, alpha, m, nneighbors):
+    "ψ(κ) = psi(k), p. 570 of [Fessler]"
+    mask = np.abs(k) < (0.5 * nneighbors)
+    f = np.sqrt(0j + 1 - (k[mask] / nneighbors * 2)**2)
+    sol = (f**m) * iv(m, alpha * f) / iv(m, alpha)
+    sol2 = np.zeros(k.shape, sol.real.dtype)
+    sol2[mask] = sol.real
+    return sol2
+
+
+def setup(xunif, f1nonunif, nneighbors, ntable):
     N = xunif.size
     K = 2 * N  # this is "flexible" in the paper but not really
     eta0 = (N - 1) / 2
@@ -21,9 +32,32 @@ def setup(xunif, fnonunif, nneighbors, ntable):
     alpha = 2.34 * nneighbors  # rule of thumb
     m = 0  # rule of thumb
     scaling = kaiserBesselFourierTransform(kbftArgs, alpha, m, nneighbors, 1)
-    return scaling
+
+    # M = f1nonunif.size
+    offset = np.floor(f1nonunif * K - nneighbors / 2)
+    d = f1nonunif * K - offset
+    kbArgs = -np.arange(1, nneighbors + 0.5) + d[:, np.newaxis]
+    Tr = kaiserBessel(kbArgs, alpha, m, nneighbors)
+    u = np.exp(1j * 2 * np.pi / K * eta0 * kbArgs) * Tr
+
+    Y = fft.fft(xunif / scaling, K)
+    Xnonunif = np.zeros(f1nonunif.shape, Y.dtype)
+    for idx in range(len(f1nonunif)):
+        o = offset[idx]
+        Xnonunif[idx] = np.dot(Y[np.mod(
+            np.arange(o + 1, 1 + o + nneighbors, dtype=int), K)],
+                               np.conj(u[idx]))
+    return scaling, u, Xnonunif
 
 
 if __name__ == '__main__':
-    s = setup(np.random.randn(32), [], 4, 2**14)
-    print(s)
+    N = 32
+    xunif = np.arange(N, dtype=float)
+    fnonunif = np.array([0, 1, 2.0, 3]) / 4.4  # fractional FFT index
+    f1nonunif = fnonunif / N  # FFT index / N
+    nneighbors = 9
+    s, u, Xn = setup(xunif, f1nonunif, nneighbors, 0)
+    gold = np.dot(
+        np.exp(-1j * 2 * np.pi * f1nonunif[:, np.newaxis] * np.arange(N)),
+        xunif)
+    print(Xn - gold)
